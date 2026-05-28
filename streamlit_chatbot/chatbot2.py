@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import squite3
 import pandas as pd
 from datetime import datetime
 
