@@ -1,266 +1,342 @@
 import streamlit as st
-import pandas as pd
 import sqlite3
+import pandas as pd
 from datetime import datetime
-import hashlib
 
-# =========================
-# PAGE CONFIG
-# =========================
-st.set_page_config(
-    page_title="Sunway Club Hub Pro",
-    page_icon="🏆",
-    layout="wide"
-)
+# --- DATABASE SETUP ---
+def init_db():
+    conn = sqlite3.connect('sunway_club.db')
+    c = conn.cursor()
+    
+    # Create tables if they don't exist
+    c.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (username TEXT PRIMARY KEY, password TEXT, pfp TEXT, watchlist TEXT, circles TEXT)''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS trial_forms 
+                 (username TEXT, club TEXT, experience TEXT, notes TEXT)''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS matchmaking 
+                 (username TEXT, sport TEXT, time TEXT, location TEXT)''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS marketplace 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, seller TEXT, item TEXT, price TEXT)''')
+    
+    c.execute('''CREATE TABLE IF NOT EXISTS reviews 
+                 (club TEXT, username TEXT, rating INTEGER, comment TEXT)''')
+    
+    conn.commit()
+    conn.close()
 
-# =========================
-# DATABASE
-# =========================
-conn = sqlite3.connect("sunway_club_pro.db", check_same_thread=False)
-c = conn.cursor()
+init_db()
 
-# USERS (hashed password + role)
-c.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE,
-    password TEXT,
-    role TEXT DEFAULT 'student'
-)
-''')
+# --- HARDCODED CLUB DATA & HISTORY ---
+CLUBS_DATA = {
+    "Basketball Club": {
+        "created_by": "Alex Wong", "year": "2015",
+        "why": "To foster teamwork and dominate the local university leagues.",
+        "popularity": 95, "emoji": "🏀",
+        "history": "🏆 Won the State Competitive Championship on May 25, 2025."
+    },
+    "Volleyball Club": {
+        "created_by": "Sarah Lee", "year": "2017",
+        "why": "To build lightning-fast reflexes and great court chemistry.",
+        "popularity": 88, "emoji": "🏐",
+        "history": "🥈 Runners-up in the National Inter-Varsity Games 2025."
+    },
+    "Badminton Club": {
+        "created_by": "Dato Justin", "year": "2012",
+        "why": "To carry on the Malaysian legacy of badminton excellence.",
+        "popularity": 98, "emoji": "🏸",
+        "history": "🏆 Clean sweep gold medals in MAPCU 2024."
+    },
+    "Football Club": {
+        "created_by": "Coach Amran", "year": "2010",
+        "why": "The ultimate beautiful game to unite students across campuses.",
+        "popularity": 92, "emoji": "⚽",
+        "history": "🏆 Sunway-Monash Derby Champions 2025."
+    },
+    "Esports Club": {
+        "created_by": "Kevin 'Pro' Tan", "year": "2019",
+        "why": "To provide a structured platform for competitive gaming and strategy.",
+        "popularity": 96, "emoji": "🎮",
+        "history": "🏆 Mobile Legends Campus Championship Winners 2025."
+    },
+    "Dev & Programming": {
+        "created_by": "Dr. Lim", "year": "2018",
+        "why": "To build real-world software solutions and ace hackathons.",
+        "popularity": 90, "emoji": "💻",
+        "history": "🏆 1st Place in Varsity Hackathon 2025."
+    },
+    "Startup & Business": {
+        "created_by": "Chloe Siew", "year": "2016",
+        "why": "Nurturing the next generation of Sunway unicorns and entrepreneurs.",
+        "popularity": 85, "emoji": "🚀",
+        "history": "💡 Secured RM50,000 seed funding for student projects in 2024."
+    },
+    "Finance Innovation": {
+        "created_by": "Ryan Teoh", "year": "2021",
+        "why": "Demystifying Web3, Trading, and Personal Wealth Management.",
+        "popularity": 82, "emoji": "📈",
+        "history": "🏆 National Bloomberg Trading Challenge Top 3 (2025)."
+    },
+    "Logic & Math Club": {
+        "created_by": "Prof. Raman", "year": "2014",
+        "why": "For minds that love breaking down complex riddles and theories.",
+        "popularity": 74, "emoji": "🧮",
+        "history": "🥇 Perfect scores in the International Youth Math Challenge 2025."
+    },
+    "Applied Science": {
+        "created_by": "Dr. Farah", "year": "2015",
+        "why": "Bridging laboratory research with real-world environmental impacts.",
+        "popularity": 79, "emoji": "🧪",
+        "history": "🌿 Received the National Green Campus Innovation Award 2025."
+    }
+}
 
-# CLUBS
-c.execute('''
-CREATE TABLE IF NOT EXISTS clubs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT,
-    description TEXT,
-    category TEXT
-)
-''')
+# --- TOURNAMENTS DATA ---
+TOURNAMENTS = [
+    {"event": "Sunway Mega Inter-Club Games", "time": "June 15, 2026", "loc": "Sunway Sports Complex", "slots": "200 Participants Left"},
+    {"event": "E-Sports Varsity Clash", "time": "July 02, 2026", "loc": "Jeffrey Cheah Hall", "slots": "64 Teams Max"},
+    {"event": "Hackathon 2026", "time": "August 20, 2026", "loc": "Sunway Innovation Labs", "slots": "40 Teams Max"}
+]
 
-# TRIALS
-c.execute('''
-CREATE TABLE IF NOT EXISTS trials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    club TEXT,
-    status TEXT DEFAULT 'pending',
-    created_at TEXT
-)
-''')
+# --- STREAMLIT UI ---
+st.set_page_config(page_title="Sunway Club Hub", page_icon="🏫", layout="wide")
+st.title("🏫 Sunway Club & Sports Hub")
 
-# POSTS / MATCHING
-c.execute('''
-CREATE TABLE IF NOT EXISTS posts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT,
-    sport TEXT,
-    message TEXT,
-    created_at TEXT
-)
-''')
-
-conn.commit()
-
-# =========================
-# SECURITY
-# =========================
-
-def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
-
-# =========================
-# SESSION STATE
-# =========================
-if "logged_in" not in st.session_state:
+# Session State Management
+if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-if "user" not in st.session_state:
-    st.session_state.user = None
+    st.session_state.username = ""
+    st.session_state.pfp = "👤"
 
-# =========================
-# AUTH
-# =========================
-
-def register_user(username, password):
-    try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)",
-                  (username, hash_password(password)))
-        conn.commit()
-        return True
-    except:
-        return False
-
-
-def login_user(username, password):
-    c.execute("SELECT * FROM users WHERE username=? AND password=?",
-              (username, hash_password(password)))
-    return c.fetchone()
-
-# =========================
-# LOGIN PAGE
-# =========================
+# --- SIDEBAR: AUTH & PROFILE ---
+st.sidebar.header("👤 Account & Navigation")
 if not st.session_state.logged_in:
-    st.title("🏆 Sunway Club Hub Pro")
-
-    tab1, tab2 = st.tabs(["Login", "Register"])
-
-    with tab1:
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            if login_user(u, p):
+    auth_mode = st.sidebar.radio("Action", ["Login", "Register"])
+    user_input = st.sidebar.text_input("Username")
+    pass_input = st.sidebar.text_input("Password", type="password")
+    
+    if st.sidebar.button(auth_mode):
+        conn = sqlite3.connect('sunway_club.db')
+        c = conn.cursor()
+        if auth_mode == "Register":
+            try:
+                c.execute("INSERT INTO users VALUES (?, ?, '👤', '', '')", (user_input, pass_input))
+                conn.commit()
+                st.sidebar.success("Registered successfully! Please login.")
+            except:
+                st.sidebar.error("Username already exists.")
+        else:
+            c.execute("SELECT * FROM users WHERE username=? AND password=?", (user_input, pass_input))
+            if c.fetchone():
                 st.session_state.logged_in = True
-                st.session_state.user = u
-                st.success("Welcome back!")
+                st.session_state.username = user_input
                 st.rerun()
             else:
-                st.error("Invalid login")
-
-    with tab2:
-        u = st.text_input("New Username")
-        p = st.text_input("New Password", type="password")
-
-        if st.button("Create Account"):
-            if register_user(u, p):
-                st.success("Account created")
-            else:
-                st.error("Username exists")
-
-# =========================
-# MAIN APP
-# =========================
+                st.sidebar.error("Invalid Credentials.")
+        conn.close()
 else:
-    st.sidebar.title(f"👤 {st.session_state.user}")
-
+    st.sidebar.success(f"Logged in as: {st.session_state.username}")
+    pfp_choice = st.sidebar.selectbox("Choose Profile Avatar", ["👤", "🦁", "⚽", "💻", "🚀"])
+    if pfp_choice != st.session_state.pfp:
+        st.session_state.pfp = pfp_choice
+    
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
-        st.session_state.user = None
         st.rerun()
 
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Dashboard", "Clubs", "Trials", "Tournaments", "Matchmaking", "Analytics"]
-    )
+# --- MAIN NAVIGATION TABS ---
+tabs = st.tabs([
+    "🗂️ Clubs Directory", "🧪 First Try (Trials)", "🏆 Tournaments & Leagues", 
+    "🤝 Matchmaking", "🛍️ Marketplace & AI Chat", "🏅 Popularity & Watchlist"
+])
 
-    # =========================
-    # DASHBOARD
-    # =========================
-    if page == "Dashboard":
-        st.title("📊 Dashboard")
-
-        col1, col2, col3 = st.columns(3)
-
-        trials = pd.read_sql_query("SELECT COUNT(*) as c FROM trials WHERE username=?",
-                                   conn, params=(st.session_state.user,))
-        posts = pd.read_sql_query("SELECT COUNT(*) as c FROM posts WHERE username=?",
-                                  conn, params=(st.session_state.user,))
-
-        col1.metric("Trials Joined", int(trials['c'][0]))
-        col2.metric("Posts", int(posts['c'][0]))
-        col3.metric("Active Clubs", "5+")
-
-    # =========================
-    # CLUBS (ADVANCED)
-    # =========================
-    elif page == "Clubs":
-        st.title("📚 Clubs Explorer")
-
-        clubs = [
-            ("Basketball", "Sports", "Team coordination + fitness"),
-            ("Badminton", "Sports", "Speed + reflex training"),
-            ("Robotics", "Tech", "AI + engineering projects"),
-            ("Debate", "Academic", "Critical thinking + speaking"),
-            ("Music", "Arts", "Performance + creativity")
-        ]
-
-        for name, cat, desc in clubs:
-            with st.expander(f"{name} ({cat})"):
-                st.write(desc)
-
-                col1, col2 = st.columns(2)
-
-                if col1.button(f"Join Trial - {name}"):
-                    c.execute("INSERT INTO trials (username, club, created_at) VALUES (?, ?, ?)",
-                              (st.session_state.user, name, str(datetime.now())))
-                    conn.commit()
-                    st.success("Trial booked")
-
-                if col2.button(f"View Stats - {name}"):
-                    st.info("Popularity: High 🔥 | Difficulty: Medium")
-
-    # =========================
-    # TRIALS
-    # =========================
-    elif page == "Trials":
-        st.title("📝 My Trials")
-
-        df = pd.read_sql_query(
-            "SELECT club, status, created_at FROM trials WHERE username=? ORDER BY id DESC",
-            conn, params=(st.session_state.user,)
-        )
-
-        st.dataframe(df, use_container_width=True)
-
-    # =========================
-    # TOURNAMENTS
-    # =========================
-    elif page == "Tournaments":
-        st.title("🏆 Tournament Hub")
-
-        tournaments = [
-            {"name": "Basketball 3v3", "status": "Open"},
-            {"name": "Badminton Cup", "status": "Ongoing"},
-            {"name": "Valorant Clash", "status": "Upcoming"}
-        ]
-
-        for t in tournaments:
-            with st.container():
-                st.subheader(t["name"])
-                st.caption(f"Status: {t['status']}")
-                st.button(f"Join {t['name']}")
-
-    # =========================
-    # MATCHMAKING (ADVANCED)
-    # =========================
-    elif page == "Matchmaking":
-        st.title("🤝 Smart Matchmaking")
-
-        sport = st.selectbox("Choose Sport", ["Basketball", "Badminton", "Football", "Gaming"])
-        level = st.selectbox("Skill Level", ["Beginner", "Intermediate", "Advanced"])
-        msg = st.text_area("Looking for...")
-
-        if st.button("Post Match Request"):
-            c.execute(
-                "INSERT INTO posts (username, sport, message, created_at) VALUES (?, ?, ?, ?)",
-                (st.session_state.user, sport, msg, str(datetime.now())))
-            conn.commit()
-            st.success("Posted!")
-
-        st.subheader("Live Feed")
-
-        posts = pd.read_sql_query("SELECT * FROM posts ORDER BY id DESC", conn)
-
-        for _, r in posts.iterrows():
-            score = "🔥 High Match" if r['sport'] == sport else "🙂 Possible Match"
-
-            st.markdown("---")
-            st.write(f"👤 {r['username']} | 🏅 {r['sport']} | {score}")
-            st.write(r['message'])
-
-    # =========================
-    # ANALYTICS
-    # =========================
-    elif page == "Analytics":
-        st.title("📊 Analytics")
-
-        df = pd.read_sql_query("SELECT club FROM trials", conn)
-
-        if not df.empty:
-            st.bar_chart(df.value_counts())
+# 1. CLUBS DIRECTORY
+with tabs[0]:
+    st.header("Explore Sunway Clubs")
+    selected_club = st.selectbox("Select a Club to View", list(CLUBS_DATA.keys()))
+    
+    club_info = CLUBS_DATA[selected_club]
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        # Placeholder for dynamic picture representation
+        st.subheader(f"{club_info['emoji']} {selected_club}")
+        st.info(f"**Founded:** {club_info['year']}\n\n**Founder:** {club_info['created_by']}")
+    
+    with col2:
+        st.markdown(f"### ❓ Why You Should Join\n>{club_info.get('why', '')}")
+        st.markdown(f"### 📜 Club Honors & History\n{club_info['history']}")
+        
+        # Action Buttons
+        if st.session_state.logged_in:
+            if st.button(f"❤️ Add {selected_club} to Watchlist"):
+                st.success(f"Added {selected_club} to your Watchlist!")
+            if st.button(f"➕ Join {selected_club} Circle"):
+                st.success(f"You are now a member of {selected_club}'s Student Circle!")
         else:
-            st.info("No data yet")
+            st.warning("🔒 Please login to add to watchlist or join circles.")
 
-st.markdown("---")
-st.caption("Sunway Club Hub Pro - Advanced Student Platform 🚀")
+    # Reviews Section
+    st.write("---")
+    st.subheader(f"💬 Student Reviews for {selected_club}")
+    
+    conn = sqlite3.connect('sunway_club.db')
+    c = conn.cursor()
+    
+    if st.session_state.logged_in:
+        with st.form(f"review_{selected_club}"):
+            rating = st.slider("Rating", 1, 5, 5)
+            comment = st.text_area("Write your club review...")
+            if st.form_submit_button("Submit Review"):
+                c.execute("INSERT INTO reviews VALUES (?, ?, ?, ?)", (selected_club, st.session_state.username, rating, comment))
+                conn.commit()
+                st.success("Review submitted!")
+    
+    # Display existing reviews
+    reviews_df = pd.read_sql_query("SELECT username, rating, comment FROM reviews WHERE club=?", conn, params=(selected_club,))
+    conn.close()
+    
+    if not reviews_df.empty:
+        for idx, row in reviews_df.iterrows():
+            st.markdown(f"**{row['username']}** ({'⭐'*row['rating']}): {row['comment']}")
+    else:
+        st.caption("No reviews yet. Be the first to review!")
+
+# 2. FIRST TRY (TRIALS)
+with tabs[1]:
+    st.header("🏃 First Try: Join a Club Trial Session")
+    st.write("Want to give a sport or club a test run? Fill out this quick form, and we'll instantly pitch it to the club managers.")
+    
+    if st.session_state.logged_in:
+        with st.form("trial_form"):
+            target_club = st.selectbox("Club to Try", list(CLUBS_DATA.keys()))
+            experience = st.selectbox("Your Experience Level", ["Complete Beginner", "Intermediate", "Advanced/State Player"])
+            notes = st.text_area("Any specific goals? (e.g., 'Looking to join the running trials to improve cardio')")
+            
+            if st.form_submit_button("Submit Application"):
+                conn = sqlite3.connect('sunway_club.db')
+                c = conn.cursor()
+                c.execute("INSERT INTO trial_forms VALUES (?, ?, ?, ?)", (st.session_state.username, target_club, experience, notes))
+                conn.commit()
+                conn.close()
+                st.success(f"🎯 Application sent to {target_club} managers! Keep an eye on your student email.")
+    else:
+        st.warning("🔒 Please log in to request a trial session.")
+
+# 3. TOURNAMENTS & LEAGUES
+with tabs[2]:
+    st.header("🏆 Live Tournaments & Active Leagues")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("🗓️ Upcoming Competitions")
+        for t in TOURNAMENTS:
+            with st.expander(t["event"]):
+                st.write(f"📅 **Time:** {t['time']}")
+                st.write(f"📍 **Location:** {t['loc']}")
+                st.write(f"👥 **Capacity:** {t['slots']}")
+                if st.button("Register Team", key=t["event"]):
+                    st.success("Registration registered! Check 'My Schedule'.")
+
+    with col2:
+        st.subheader("🏛️ Leagues History & Hall of Fame")
+        st.write("Tracking Sunway University's elite competitive history:")
+        for club, details in CLUBS_DATA.items():
+            st.markdown(f"**{club}**: {details['history']}")
+
+# 4. MATCHMAKING
+with tabs[3]:
+    st.header("🤝 Peer Sports Matchmaking")
+    st.write("Looking for a player to fill up a court session or a casual spar?")
+    
+    if st.session_state.logged_in:
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.subheader("Post a Match Session")
+            m_sport = st.selectbox("Sport/Activity", ["Basketball", "Volleyball", "Badminton", "Football", "Gaming/Esports"])
+            m_time = st.text_input("When? (e.g., Today 5 PM)")
+            m_loc = st.text_input("Where? (e.g., Sunway College Roof Court)")
+            
+            if st.button("Broadcast Request"):
+                conn = sqlite3.connect('sunway_club.db')
+                c = conn.cursor()
+                c.execute("INSERT INTO matchmaking VALUES (?, ?, ?, ?)", (st.session_state.username, m_sport, m_time, m_loc))
+                conn.commit()
+                conn.close()
+                st.success("Broadcasted! Other students can now see your request below.")
+        
+        with col2:
+            st.subheader("Available Matches Nearby")
+            conn = sqlite3.connect('sunway_club.db')
+            match_df = pd.read_sql_query("SELECT * FROM matchmaking", conn)
+            conn.close()
+            
+            if not match_df.empty:
+                for idx, row in match_df.iterrows():
+                    st.warning(f"🏃 **{row['username']}** wants to play **{row['sport']}**!\n\n📅 {row['time']} | 📍 {row['location']}")
+                    if st.button(f"Join Match with {row['username']}", key=f"match_{idx}"):
+                        st.balloons()
+                        st.success(f"Matched! Contacting {row['username']} for coordination.")
+            else:
+                st.caption("No active sports matching requests currently open.")
+    else:
+        st.warning("🔒 Please login to find sports peers.")
+
+# 5. PEER MARKETPLACE & AI CHAT
+with tabs[4]:
+    st.header("🛒 Student Peer Marketplace")
+    st.caption("Buy or sell sports jerseys, gear, textbooks, or tech items from fellow Sunwayians.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Items For Sale")
+        conn = sqlite3.connect('sunway_club.db')
+        if st.session_state.logged_in:
+            with st.form("sell_item"):
+                item_name = st.text_input("Item Name")
+                price = st.text_input("Price (RM)")
+                if st.form_submit_button("Post Listing"):
+                    c = conn.cursor()
+                    c.execute("INSERT INTO marketplace (seller, item, price) VALUES (?, ?, ?)", (st.session_state.username, item_name, price))
+                    conn.commit()
+                    st.success("Item Listed!")
+        
+        market_df = pd.read_sql_query("SELECT * FROM marketplace", conn)
+        conn.close()
+        
+        if not market_df.empty:
+            for idx, row in market_df.iterrows():
+                st.write(f"📦 **{row['item']}** — **RM{row['price']}** (Seller: {row['seller']})")
+        else:
+            st.caption("No listings yet.")
+            
+    with col2:
+        st.subheader("🤖 Ask Sunny (Your AI Club Guide)")
+        ai_prompt = st.text_input("Ask anything (e.g., 'Which club won the state in 2025?')")
+        if ai_prompt:
+            # Rule-based AI Mock responding logically to inputs
+            prompt_lower = ai_prompt.lower()
+            if "basketball" in prompt_lower or "2025" in prompt_lower:
+                st.write("🤖 **Sunny:** The Sunway Basketball Club proudly brought home the State Competitive Championship title on May 25, 2025!")
+            elif "programming" in prompt_lower or "dev" in prompt_lower:
+                st.write("🤖 **Sunny:** The Dev & Programming club was started by Dr. Lim in 2018 to win Hackathons!")
+            else:
+                st.write("🤖 **Sunny:** I recommend checking out the 'Clubs Directory' or joining the Basketball Club if you are looking for high energy!")
+
+# 6. STANDINGS & COMMON ROOMS
+with tabs[5]:
+    st.header("📊 Popularity Standings & Common Area")
+    
+    # Standings Data Chart
+    standings = [{"Club": k, "Popularity Score 🔥": v["popularity"]} for k, v in CLUBS_DATA.items()]
+    df_standings = pd.DataFrame(standings).sort_values(by="Popularity Score 🔥", ascending=False)
+    
+    st.dataframe(df_standings, use_container_width=True, hide_index=True)
+    
+    st.write("---")
+    st.subheader("🏢 Set Common Room Status")
+    st.write("See how busy the club common lounge room is right now.")
+    room_status = st.select_slider("Lounge Congestion Level", options=["Empty 🍃", "Chilled ☕", "Buzzing 🗣️", "Packed 💥"])
+    st.info(f"Current Common Room Setting: **{room_status}**")
